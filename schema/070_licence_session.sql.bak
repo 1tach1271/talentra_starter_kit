@@ -1,0 +1,414 @@
+-- 070_licence_session.sql
+-- Dependencies: 000_setup.sql, 010_master_data.sql,
+-- 020_administration.sql, 030_organisation.sql
+
+-- Validate that a reference_code belongs to the required category.
+CREATE OR REPLACE FUNCTION validate_reference_code_category()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  v_reference_code_id bigint;
+  v_type_code text := TG_ARGV[1];
+  v_type_id bigint;
+BEGIN
+  v_reference_code_id := NULLIF(to_jsonb(NEW) ->> TG_ARGV[0], '')::bigint;
+
+  IF v_reference_code_id IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  SELECT id INTO v_type_id
+  FROM reference_code_type
+  WHERE code = v_type_code;
+
+  IF v_type_id IS NULL OR NOT EXISTS (
+    SELECT 1
+    FROM reference_code
+    WHERE id = v_reference_code_id
+      AND reference_code_type_id = v_type_id
+  ) THEN
+    RAISE EXCEPTION 'Reference code must belong to category %', v_type_code
+      USING ERRCODE = '23514';
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+
+CREATE TABLE licence (
+  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  public_id uuid NOT NULL DEFAULT gen_random_uuid(),
+  organisation_id bigint NOT NULL,
+  max_users integer NOT NULL,
+  max_devices_per_user integer NOT NULL,
+  valid_from timestamptz NOT NULL,
+  valid_until timestamptz NOT NULL,
+  status_id bigint NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  created_by bigint,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  updated_by bigint,
+  deleted_at timestamptz,
+  CONSTRAINT uq_licence_public_id UNIQUE (public_id),
+  CONSTRAINT fk_licence_organisation_id
+    FOREIGN KEY (organisation_id)
+    REFERENCES organisation (id) ON DELETE RESTRICT,
+  CONSTRAINT fk_licence_status_id
+    FOREIGN KEY (status_id)
+    REFERENCES reference_code (id) ON DELETE RESTRICT,
+  CONSTRAINT ck_licence_max_users CHECK (max_users > 0),
+  CONSTRAINT ck_licence_max_devices_per_user CHECK (max_devices_per_user > 0),
+  CONSTRAINT ck_licence_validity CHECK (valid_until > valid_from)
+);
+
+COMMENT ON COLUMN licence.created_by IS
+  'Nullable for system-created records; FK added in schema/900_audit_fks.sql.';
+COMMENT ON COLUMN licence.updated_by IS
+  'Nullable until an actor is known; FK added in schema/900_audit_fks.sql.';
+COMMENT ON COLUMN licence.deleted_at IS
+  'NULL while the licence is not soft-deleted.';
+CREATE INDEX idx_licence_organisation_id ON licence (organisation_id);
+CREATE INDEX idx_licence_status_id ON licence (status_id);
+CREATE INDEX idx_licence_validity ON licence (valid_from, valid_until);
+
+CREATE TRIGGER trg_licence_updated_at
+BEFORE UPDATE ON licence
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TRIGGER trg_licence_status_category
+BEFORE INSERT OR UPDATE OF status_id ON licence
+FOR EACH ROW EXECUTE FUNCTION validate_reference_code_category('status_id', 'licence_status');
+
+
+CREATE TABLE licence_seat (
+  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  licence_id bigint NOT NULL,
+  app_user_id bigint NOT NULL,
+  effective_from timestamptz NOT NULL DEFAULT now(),
+  effective_until timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  created_by bigint,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  updated_by bigint,
+  CONSTRAINT fk_licence_seat_licence_id
+    FOREIGN KEY (licence_id) REFERENCES licence (id) ON DELETE RESTRICT,
+  CONSTRAINT fk_licence_seat_app_user_id
+    FOREIGN KEY (app_user_id) REFERENCES app_user (id) ON DELETE RESTRICT,
+  CONSTRAINT ck_licence_seat_effective_period
+    CHECK (effective_until IS NULL OR effective_until > effective_from),
+  CONSTRAINT ex_licence_seat_user_period
+    EXCLUDE USING gist (
+      licence_id WITH =,
+      app_user_id WITH =,
+      tstzrange(effective_from, effective_until, '[)') WITH &&
+    )
+);
+
+COMMENT ON COLUMN licence_seat.effective_until IS
+  'NULL when the seat assignment has no scheduled end date.';
+COMMENT ON COLUMN licence_seat.created_by IS
+  'Nullable for system-created records; FK added in schema/900_audit_fks.sql.';
+COMMENT ON COLUMN licence_seat.updated_by IS
+  'Nullable until an actor is known; FK added in schema/900_audit_fks.sql.';
+CREATE INDEX idx_licence_seat_app_user_id ON licence_seat (app_user_id);
+CREATE INDEX idx_licence_seat_licence_id ON licence_seat (licence_id);
+
+CREATE TRIGGER trg_licence_seat_updated_at
+BEFORE UPDATE ON licence_seat
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+
+CREATE TABLE registered_device (
+  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  public_id uuid NOT NULL DEFAULT gen_random_uuid(),
+  app_user_id bigint NOT NULL,
+  device_identifier_hash varchar(128) NOT NULL,
+  device_name varchar(150),
+  platform varchar(60) NOT NULL,
+  registered_at timestamptz NOT NULL DEFAULT now(),
+  revoked_at timestamptz,
+  status_id bigint NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  created_by bigint,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  updated_by bigint,
+  CONSTRAINT uq_registered_device_public_id UNIQUE (public_id),
+  CONSTRAINT uq_registered_device_user_hash
+    UNIQUE (app_user_id, device_identifier_hash),
+  CONSTRAINT fk_registered_device_app_user_id
+    FOREIGN KEY (app_user_id) REFERENCES app_user (id) ON DELETE RESTRICT,
+  CONSTRAINT fk_registered_device_status_id
+    FOREIGN KEY (status_id) REFERENCES reference_code (id) ON DELETE RESTRICT,
+  CONSTRAINT ck_registered_device_revocation
+    CHECK (revoked_at IS NULL OR revoked_at >= registered_at)
+);
+
+COMMENT ON COLUMN registered_device.device_name IS
+  'NULL when the device has no user-facing name.';
+COMMENT ON COLUMN registered_device.created_by IS
+  'Nullable for system-created records; FK added in schema/900_audit_fks.sql.';
+COMMENT ON COLUMN registered_device.updated_by IS
+  'Nullable until an actor is known; FK added in schema/900_audit_fks.sql.';
+CREATE INDEX idx_registered_device_app_user_id ON registered_device (app_user_id);
+CREATE INDEX idx_registered_device_status_id ON registered_device (status_id);
+
+CREATE TRIGGER trg_registered_device_updated_at
+BEFORE UPDATE ON registered_device
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TRIGGER trg_registered_device_status_category
+BEFORE INSERT OR UPDATE OF status_id ON registered_device
+FOR EACH ROW EXECUTE FUNCTION validate_reference_code_category('status_id', 'device_status');
+
+
+CREATE TABLE session_device (
+  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  identity_session_id bigint NOT NULL,
+  registered_device_id bigint NOT NULL,
+  last_activity_at timestamptz NOT NULL DEFAULT now(),
+  ended_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  created_by bigint,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  updated_by bigint,
+  CONSTRAINT fk_session_device_identity_session_id
+    FOREIGN KEY (identity_session_id)
+    REFERENCES identity_session (id) ON DELETE RESTRICT,
+  CONSTRAINT fk_session_device_registered_device_id
+    FOREIGN KEY (registered_device_id)
+    REFERENCES registered_device (id) ON DELETE RESTRICT,
+  CONSTRAINT ck_session_device_end_time
+    CHECK (ended_at IS NULL OR ended_at >= last_activity_at)
+);
+
+COMMENT ON COLUMN session_device.created_by IS
+  'Nullable for system-created records; FK added in schema/900_audit_fks.sql.';
+COMMENT ON COLUMN session_device.updated_by IS
+  'Nullable until an actor is known; FK added in schema/900_audit_fks.sql.';
+CREATE UNIQUE INDEX uq_session_device_active_device
+  ON session_device (registered_device_id)
+  WHERE ended_at IS NULL;
+CREATE INDEX idx_session_device_identity_session_id
+  ON session_device (identity_session_id);
+CREATE INDEX idx_session_device_last_activity_at
+  ON session_device (last_activity_at);
+
+CREATE TRIGGER trg_session_device_updated_at
+BEFORE UPDATE ON session_device
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+
+CREATE TABLE login_attempt (
+  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  app_user_id bigint,
+  registered_device_id bigint,
+  outcome_id bigint NOT NULL,
+  attempted_at timestamptz NOT NULL DEFAULT now(),
+  source_ip inet,
+  details jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  created_by bigint,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  updated_by bigint,
+  CONSTRAINT fk_login_attempt_app_user_id
+    FOREIGN KEY (app_user_id) REFERENCES app_user (id) ON DELETE SET NULL,
+  CONSTRAINT fk_login_attempt_registered_device_id
+    FOREIGN KEY (registered_device_id)
+    REFERENCES registered_device (id) ON DELETE SET NULL,
+  CONSTRAINT fk_login_attempt_outcome_id
+    FOREIGN KEY (outcome_id) REFERENCES reference_code (id) ON DELETE RESTRICT
+);
+
+COMMENT ON COLUMN login_attempt.app_user_id IS
+  'NULL when the attempted account could not be identified.';
+COMMENT ON COLUMN login_attempt.registered_device_id IS
+  'NULL when the device could not be identified or registered.';
+COMMENT ON COLUMN login_attempt.source_ip IS
+  'NULL when the source IP address is unavailable.';
+COMMENT ON COLUMN login_attempt.created_by IS
+  'Nullable for system-generated records; FK added in schema/900_audit_fks.sql.';
+COMMENT ON COLUMN login_attempt.updated_by IS
+  'Nullable for system-generated records; FK added in schema/900_audit_fks.sql.';
+CREATE INDEX idx_login_attempt_app_user_id ON login_attempt (app_user_id);
+CREATE INDEX idx_login_attempt_attempted_at ON login_attempt (attempted_at);
+
+CREATE TRIGGER trg_login_attempt_outcome_category
+BEFORE INSERT OR UPDATE OF outcome_id ON login_attempt
+FOR EACH ROW EXECUTE FUNCTION validate_reference_code_category('outcome_id', 'login_attempt_status');
+
+CREATE TRIGGER trg_login_attempt_forbid_change
+BEFORE UPDATE OR DELETE ON login_attempt
+FOR EACH ROW EXECUTE FUNCTION forbid_change();
+
+
+CREATE TABLE device_revocation_event (
+  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  registered_device_id bigint NOT NULL,
+  actor_user_id bigint,
+  reason_code_id bigint NOT NULL,
+  revoked_at timestamptz NOT NULL DEFAULT now(),
+  details jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  created_by bigint,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  updated_by bigint,
+  CONSTRAINT fk_device_revocation_event_device_id
+    FOREIGN KEY (registered_device_id)
+    REFERENCES registered_device (id) ON DELETE RESTRICT,
+  CONSTRAINT fk_device_revocation_event_actor_user_id
+    FOREIGN KEY (actor_user_id) REFERENCES app_user (id) ON DELETE SET NULL,
+  CONSTRAINT fk_device_revocation_event_reason_code_id
+    FOREIGN KEY (reason_code_id) REFERENCES reference_code (id) ON DELETE RESTRICT
+);
+
+COMMENT ON COLUMN device_revocation_event.actor_user_id IS
+  'NULL when the revocation was performed by an automated process.';
+COMMENT ON COLUMN device_revocation_event.created_by IS
+  'Nullable for system-generated records; FK added in schema/900_audit_fks.sql.';
+COMMENT ON COLUMN device_revocation_event.updated_by IS
+  'Nullable for system-generated records; FK added in schema/900_audit_fks.sql.';
+CREATE INDEX idx_device_revocation_event_device_id
+  ON device_revocation_event (registered_device_id);
+CREATE INDEX idx_device_revocation_event_revoked_at
+  ON device_revocation_event (revoked_at);
+
+CREATE TRIGGER trg_device_revocation_event_forbid_change
+BEFORE UPDATE OR DELETE ON device_revocation_event
+FOR EACH ROW EXECUTE FUNCTION forbid_change();
+
+CREATE TRIGGER trg_device_revocation_event_reason_category
+BEFORE INSERT OR UPDATE OF reason_code_id ON device_revocation_event
+FOR EACH ROW EXECUTE FUNCTION validate_reference_code_category('reason_code_id', 'device_revocation_reason');
+
+
+-- Checks device limits and records a rejection without raising an exception.
+-- Call inside the application's login transaction after identity_session exists.
+CREATE OR REPLACE FUNCTION try_register_session_device(
+  p_app_user_id bigint,
+  p_identity_session_id bigint,
+  p_registered_device_id bigint,
+  p_actor_user_id bigint DEFAULT NULL
+)
+RETURNS text
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  v_limit integer;
+  v_active_count integer;
+  v_outcome_id bigint;
+  v_device_user_id bigint;
+BEGIN
+  -- Serialize login checks for this user, including across multiple licences.
+  PERFORM 1 FROM app_user
+  WHERE id = p_app_user_id AND deleted_at IS NULL
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RETURN 'user_not_found_or_deleted';
+  END IF;
+
+  -- Confirm session and device belong to the same user.
+  IF NOT EXISTS (
+    SELECT 1 FROM identity_session
+    WHERE id = p_identity_session_id
+      AND app_user_id = p_app_user_id
+      AND revoked_at IS NULL
+      AND expires_at > now()
+  ) THEN
+    RETURN 'session_invalid';
+  END IF;
+
+  SELECT app_user_id INTO v_device_user_id
+  FROM registered_device
+  WHERE id = p_registered_device_id
+    AND status_id IN (
+      SELECT rc.id
+      FROM reference_code rc
+      JOIN reference_code_type t ON t.id = rc.reference_code_type_id
+      WHERE t.code = 'device_status' AND rc.code = 'active' AND rc.is_active
+    )
+    AND revoked_at IS NULL;
+
+  IF v_device_user_id IS DISTINCT FROM p_app_user_id THEN
+    RETURN 'device_invalid';
+  END IF;
+
+  SELECT l.max_devices_per_user INTO v_limit
+  FROM licence_seat ls
+  JOIN licence l ON l.id = ls.licence_id
+  JOIN reference_code status ON status.id = l.status_id
+  JOIN reference_code_type stype ON stype.id = status.reference_code_type_id
+  WHERE ls.app_user_id = p_app_user_id
+    AND ls.effective_from <= now()
+    AND (ls.effective_until IS NULL OR ls.effective_until > now())
+    AND l.deleted_at IS NULL
+    AND l.valid_from <= now()
+    AND l.valid_until > now()
+    AND stype.code = 'licence_status'
+    AND status.code = 'active'
+    AND status.is_active
+  ORDER BY ls.effective_from DESC
+  LIMIT 1;
+
+  IF v_limit IS NULL THEN
+    RETURN 'no_active_licence';
+  END IF;
+
+  SELECT count(*) INTO v_active_count
+  FROM session_device sd
+  JOIN identity_session s ON s.id = sd.identity_session_id
+  JOIN registered_device d ON d.id = sd.registered_device_id
+  WHERE d.app_user_id = p_app_user_id
+    AND sd.ended_at IS NULL
+    AND sd.last_activity_at >= now() - interval '30 minutes'
+    AND s.revoked_at IS NULL
+    AND s.expires_at > now();
+
+  IF v_active_count >= v_limit THEN
+    SELECT rc.id INTO v_outcome_id
+    FROM reference_code rc
+    JOIN reference_code_type t ON t.id = rc.reference_code_type_id
+    WHERE t.code = 'login_attempt_status'
+      AND rc.code = 'limit_reached'
+      AND rc.is_active;
+
+    INSERT INTO login_attempt
+      (app_user_id, registered_device_id, outcome_id, details, created_by)
+    VALUES
+      (p_app_user_id, p_registered_device_id, v_outcome_id,
+       jsonb_build_object('reason', 'device_limit_reached'), p_actor_user_id);
+
+    INSERT INTO audit_event
+      (actor_user_id, event_code, entity_type, entity_id, event_data, created_by)
+    VALUES
+      (p_actor_user_id, 'device_limit_reached', 'registered_device',
+       p_registered_device_id,
+       jsonb_build_object('app_user_id', p_app_user_id, 'limit', v_limit),
+       p_actor_user_id);
+
+    RETURN 'limit_reached';
+  END IF;
+
+  INSERT INTO session_device
+    (identity_session_id, registered_device_id, created_by, updated_by)
+  VALUES
+    (p_identity_session_id, p_registered_device_id, p_actor_user_id, p_actor_user_id);
+
+  SELECT rc.id INTO v_outcome_id
+  FROM reference_code rc
+  JOIN reference_code_type t ON t.id = rc.reference_code_type_id
+  WHERE t.code = 'login_attempt_status'
+    AND rc.code = 'accepted'
+    AND rc.is_active;
+
+  INSERT INTO login_attempt
+    (app_user_id, registered_device_id, outcome_id, details, created_by)
+  VALUES
+    (p_app_user_id, p_registered_device_id, v_outcome_id,
+     jsonb_build_object('reason', 'accepted'), p_actor_user_id);
+
+  RETURN 'accepted';
+END;
+$$;

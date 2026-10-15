@@ -55,13 +55,16 @@ insert into candidate_experience (candidate_profile_id, job_role_id, employment_
 select g, (g % 20) + 1, (g % 5) + 1, 'Employer ' || (g % 800), 'Engineer', date '2020-01-01', true from generate_series(1, :n_profiles) g where g % 5 <> 0;
 insert into resume_version (candidate_profile_id, version_no, file_reference, is_primary)
 select g, 1, 'resumes/' || g || '.pdf', true from generate_series(1, :n_profiles) g;
-insert into block_list (candidate_profile_id, organisation_id) select g, (g % :n_orgs) + 1 from generate_series(1, 20) g;
+insert into block_list (candidate_profile_id, organisation_id, block_target_type_id)
+select g, (g % :n_orgs) + 1, (select id from block_target_type where code = 'organisation')
+from generate_series(1, 20) g;
 
-insert into job (organisation_id, job_role_id, employment_type_id, work_type_id, job_status_id, city_id, title, salary_min, salary_max, salary_currency_id, published_at, description, experience_min_years, experience_max_years, openings)
+insert into job (organisation_id, job_role_id, employment_type_id, work_type_id, job_status_id, city_id, title, salary_min, salary_max, salary_currency_id, published_at, description, experience_min_years, experience_max_years, openings, job_category_id)
 select (g % :n_orgs) + 1, (g % 20) + 1, (g % 5) + 1, (g % 3) + 1,
        case g % 10 when 8 then 1 when 9 then 4 else 2 end, (g % 12) + 1,
        r.name || ' #' || g, 300000 + (g * 13) % 1500000, 300000 + (g * 13) % 1500000 + (g * 7) % 500000, 1,
-       now() - ((g % 90) || ' days')::interval, 'Seeded job description ' || g, (g % 5), (g % 5) + 3, (g % 4) + 1
+       now() - ((g % 90) || ' days')::interval, 'Seeded job description ' || g, (g % 5), (g % 5) + 3, (g % 4) + 1,
+       (g % 8) + 1
 from generate_series(1, :n_jobs) g join job_role r on r.id = (g % 20) + 1;
 insert into job_skill (job_id, skill_id, is_mandatory) select g, ((g + (k - 1) * 7) % 30) + 1, k <= 2 from generate_series(1, :n_jobs) g, generate_series(1, 4) k;
 

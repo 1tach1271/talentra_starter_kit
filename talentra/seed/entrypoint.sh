@@ -3,12 +3,14 @@ set -e
 
 HOST="${DB_HOST:-db}"
 PORT="${DB_PORT:-5432}"
-USER="${DB_USER:-talentra}"
 
-echo "Waiting for PostgreSQL at $HOST:$PORT ..."
+echo "Waiting for PostgreSQL at $HOST:$PORT (max 5 min) ..."
 
-# Poll until postgres accepts connections (max 60s)
-for i in $(seq 1 30); do
+# Poll until postgres accepts connections — 150 attempts × 2s = 300s max.
+# The DB container runs all initdb SQL files before accepting connections,
+# which can take 2-3 minutes for the full seed dataset.
+READY=0
+for i in $(seq 1 150); do
     if python - <<'EOF'
 import psycopg, os, sys
 try:
@@ -25,12 +27,18 @@ except Exception:
     sys.exit(1)
 EOF
     then
-        echo "PostgreSQL is ready."
+        echo "PostgreSQL is ready (attempt $i)."
+        READY=1
         break
     fi
-    echo "  attempt $i/30 — not ready yet, waiting 2s..."
+    echo "  attempt $i/150 — not ready yet, waiting 2s..."
     sleep 2
 done
+
+if [ "$READY" -eq 0 ]; then
+    echo "ERROR: PostgreSQL did not become ready after 300 seconds. Aborting." >&2
+    exit 1
+fi
 
 echo "Running Talentra seed scripts..."
 python run_all.py

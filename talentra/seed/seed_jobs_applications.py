@@ -250,7 +250,6 @@ def run(conn):
                 """
                 INSERT INTO application (job_id, candidate_profile_id, application_stage_id, applied_at)
                 VALUES (%s,%s,%s,%s)
-                ON CONFLICT (job_id, candidate_profile_id) DO NOTHING
                 """,
                 application_rows[batch_start: batch_start + BATCH_SIZE],
             )

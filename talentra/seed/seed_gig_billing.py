@@ -9,6 +9,7 @@ Seeds:
 import random
 import uuid
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 
 import psycopg
 from faker import Faker
@@ -222,7 +223,7 @@ def run(conn):
             po_id = cur.fetchone()[0]
 
             # invoice
-            tax    = round(plan_price * 0.18, 2)
+            tax    = round(plan_price * Decimal('0.18'), 2)
             total  = plan_price + tax
             inv_no = f"INV-{org_id:08d}"
             cur.execute(
