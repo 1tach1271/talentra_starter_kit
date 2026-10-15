@@ -1,18 +1,52 @@
 services:
+
+  # ── PostgreSQL 16 ─────────────────────────────────────────────────────────
   db:
     image: postgres:16
     container_name: talentra_db
     environment:
-      POSTGRES_USER: talentra
+      POSTGRES_USER:     talentra
       POSTGRES_PASSWORD: talentra
-      POSTGRES_DB: talentra
+      POSTGRES_DB:       talentra
     ports:
       - "5432:5432"
     volumes:
       - talentra_data:/var/lib/postgresql/data
+      # auto-run all SQL files in talentra_db/ on first start
+      - ./talentra_db:/docker-entrypoint-initdb.d
     command: >
-      postgres -c shared_buffers=4GB -c work_mem=64MB
-      -c maintenance_work_mem=1GB -c max_wal_size=8GB
-      -c shared_preload_libraries=pg_stat_statements
+      postgres
+        -c shared_buffers=256MB
+        -c work_mem=16MB
+        -c maintenance_work_mem=256MB
+        -c max_wal_size=2GB
+        -c shared_preload_libraries=pg_stat_statements
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U talentra -d talentra"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  # ── Python seed service ───────────────────────────────────────────────────
+  # Runs once after postgres is healthy, then exits.
+  # Your friend just needs: docker compose up
+  seed:
+    build:
+      context: ./seed
+      dockerfile: Dockerfile
+    container_name: talentra_seed
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DB_HOST:     db
+      DB_PORT:     "5432"
+      DB_NAME:     talentra
+      DB_USER:     talentra
+      DB_PASSWORD: talentra
+    restart: "no"   # exit after seeding — do not restart
+
 volumes:
   talentra_data:
+    # docker compose down -v  ← removes this volume and wipes all data
