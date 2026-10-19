@@ -1,0 +1,70 @@
+BEGIN
+Limit  (cost=206849.28..206849.32 rows=15 width=434) (actual time=878.716..885.276 rows=15 loops=1)
+  Buffers: shared hit=17144 read=121961
+  ->  Sort  (cost=206849.28..206849.58 rows=120 width=434) (actual time=872.897..879.455 rows=15 loops=1)
+        Sort Key: (count(*)) DESC NULLS LAST
+        Sort Method: quicksort  Memory: 27kB
+        Buffers: shared hit=17144 read=121961
+        ->  Merge Left Join  (cost=206828.88..206846.34 rows=120 width=434) (actual time=872.735..879.444 rows=30 loops=1)
+              Merge Cond: (sk.id = candidate_skill.skill_id)
+              Buffers: shared hit=17144 read=121961
+              ->  Merge Left Join  (cost=23338.57..23347.45 rows=120 width=434) (actual time=91.288..91.919 rows=30 loops=1)
+                    Merge Cond: (sk.id = job_skill.skill_id)
+                    Buffers: shared hit=14839
+                    ->  Sort  (cost=15.34..15.64 rows=120 width=426) (actual time=0.023..0.032 rows=30 loops=1)
+                          Sort Key: sk.id
+                          Sort Method: quicksort  Memory: 26kB
+                          Buffers: shared hit=1
+                          ->  Seq Scan on skill sk  (cost=0.00..11.20 rows=120 width=426) (actual time=0.017..0.019 rows=30 loops=1)
+                                Buffers: shared hit=1
+                    ->  Finalize GroupAggregate  (cost=23323.23..23330.83 rows=30 width=16) (actual time=91.253..91.850 rows=30 loops=1)
+                          Group Key: job_skill.skill_id
+                          Buffers: shared hit=14838
+                          ->  Gather Merge  (cost=23323.23..23330.23 rows=60 width=16) (actual time=91.235..91.800 rows=90 loops=1)
+                                Workers Planned: 2
+                                Workers Launched: 2
+                                Buffers: shared hit=14838
+                                ->  Sort  (cost=22323.21..22323.28 rows=30 width=16) (actual time=81.771..81.778 rows=30 loops=3)
+                                      Sort Key: job_skill.skill_id
+                                      Sort Method: quicksort  Memory: 26kB
+                                      Buffers: shared hit=14838
+                                      Worker 0:  Sort Method: quicksort  Memory: 26kB
+                                      Worker 1:  Sort Method: quicksort  Memory: 26kB
+                                      ->  Partial HashAggregate  (cost=22322.17..22322.47 rows=30 width=16) (actual time=81.751..81.757 rows=30 loops=3)
+                                            Group Key: job_skill.skill_id
+                                            Batches: 1  Memory Usage: 24kB
+                                            Buffers: shared hit=14820
+                                            Worker 0:  Batches: 1  Memory Usage: 24kB
+                                            Worker 1:  Batches: 1  Memory Usage: 24kB
+                                            ->  Parallel Seq Scan on job_skill  (cost=0.00..19821.45 rows=500145 width=8) (actual time=1.838..45.796 rows=400116 loops=3)
+                                                  Buffers: shared hit=14820
+              ->  Finalize GroupAggregate  (cost=183490.31..183497.91 rows=30 width=16) (actual time=781.421..787.493 rows=30 loops=1)
+                    Group Key: candidate_skill.skill_id
+                    Buffers: shared hit=2305 read=121961
+                    ->  Gather Merge  (cost=183490.31..183497.31 rows=60 width=16) (actual time=781.403..787.463 rows=90 loops=1)
+                          Workers Planned: 2
+                          Workers Launched: 2
+                          Buffers: shared hit=2305 read=121961
+                          ->  Sort  (cost=182490.29..182490.36 rows=30 width=16) (actual time=773.157..773.160 rows=30 loops=3)
+                                Sort Key: candidate_skill.skill_id
+                                Sort Method: quicksort  Memory: 26kB
+                                Buffers: shared hit=2305 read=121961
+                                Worker 0:  Sort Method: quicksort  Memory: 26kB
+                                Worker 1:  Sort Method: quicksort  Memory: 26kB
+                                ->  Partial HashAggregate  (cost=182489.25..182489.55 rows=30 width=16) (actual time=773.117..773.121 rows=30 loops=3)
+                                      Group Key: candidate_skill.skill_id
+                                      Batches: 1  Memory Usage: 24kB
+                                      Buffers: shared hit=2287 read=121961
+                                      Worker 0:  Batches: 1  Memory Usage: 24kB
+                                      Worker 1:  Batches: 1  Memory Usage: 24kB
+                                      ->  Parallel Seq Scan on candidate_skill  (cost=0.00..163075.50 rows=3882750 width=8) (actual time=1.524..443.107 rows=3106186 loops=3)
+                                            Buffers: shared hit=2287 read=121961
+Planning:
+  Buffers: shared hit=281
+Planning Time: 0.644 ms
+JIT:
+  Functions: 53
+  Options: Inlining false, Optimization false, Expressions true, Deforming true
+  Timing: Generation 1.403 ms, Inlining 0.000 ms, Optimization 0.751 ms, Emission 15.435 ms, Total 17.589 ms
+Execution Time: 895.468 ms
+ROLLBACK

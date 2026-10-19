@@ -1,0 +1,36 @@
+BEGIN
+Limit  (cost=93.01..216.01 rows=200 width=114) (actual time=0.334..7.781 rows=200 loops=1)
+  Buffers: shared hit=3350
+  ->  GroupAggregate  (cost=93.01..2232909.87 rows=3630691 width=114) (actual time=0.333..7.766 rows=200 loops=1)
+        Group Key: j.organisation_id, s.code
+        Buffers: shared hit=3350
+        ->  Incremental Sort  (cost=93.01..2169372.77 rows=3630691 width=106) (actual time=0.324..7.394 rows=4800 loops=1)
+              Sort Key: j.organisation_id, s.code
+              Presorted Key: j.organisation_id
+              Full-sort Groups: 30  Sort Method: quicksort  Average Memory: 27kB  Peak Memory: 27kB
+              Pre-sorted Groups: 28  Sort Method: quicksort  Average Memory: 32kB  Peak Memory: 32kB
+              Buffers: shared hit=3350
+              ->  Nested Loop  (cost=1.01..1991055.71 rows=3630691 width=106) (actual time=0.055..6.307 rows=5135 loops=1)
+                    Buffers: shared hit=3344
+                    ->  Nested Loop  (cost=0.85..1900556.72 rows=3630691 width=16) (actual time=0.046..5.084 rows=5135 loops=1)
+                          Buffers: shared hit=3330
+                          ->  Index Scan using idx_job_organisation_id on job j  (cost=0.42..50934.72 rows=300000 width=16) (actual time=0.013..1.325 rows=594 loops=1)
+                                Buffers: shared hit=595
+                          ->  Index Scan using idx_application_job_stage on application a  (cost=0.43..5.48 rows=69 width=16) (actual time=0.002..0.006 rows=9 loops=594)
+                                Index Cond: (job_id = j.id)
+                                Filter: (applied_at > (now() - '30 days'::interval))
+                                Rows Removed by Filter: 9
+                                Buffers: shared hit=2735
+                    ->  Memoize  (cost=0.15..0.17 rows=1 width=106) (actual time=0.000..0.000 rows=1 loops=5135)
+                          Cache Key: a.application_stage_id
+                          Cache Mode: logical
+                          Hits: 5128  Misses: 7  Evictions: 0  Overflows: 0  Memory Usage: 1kB
+                          Buffers: shared hit=14
+                          ->  Index Scan using application_stage_pkey on application_stage s  (cost=0.14..0.16 rows=1 width=106) (actual time=0.001..0.001 rows=1 loops=7)
+                                Index Cond: (id = a.application_stage_id)
+                                Buffers: shared hit=14
+Planning:
+  Buffers: shared hit=632 read=15 dirtied=1
+Planning Time: 1.471 ms
+Execution Time: 7.847 ms
+ROLLBACK

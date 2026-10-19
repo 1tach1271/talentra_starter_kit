@@ -1,0 +1,19 @@
+BEGIN
+Limit  (cost=5.59..522.65 rows=50 width=20) (actual time=0.030..0.512 rows=50 loops=1)
+  Buffers: shared hit=498
+  ->  Merge Join  (cost=5.59..162765.21 rows=15739 width=20) (actual time=0.029..0.508 rows=50 loops=1)
+        Merge Cond: (cp.id = s.candidate_profile_id)
+        Buffers: shared hit=498
+        ->  Index Scan using candidate_profile_pkey on candidate_profile cp  (cost=0.42..57702.68 rows=48934 width=20) (actual time=0.009..0.345 rows=122 loops=1)
+              Filter: ((deleted_at IS NULL) AND (city_id = 1))
+              Rows Removed by Filter: 2367
+              Buffers: shared hit=84
+        ->  Index Only Scan using idx_candidate_skill_skill_candidate on candidate_skill s  (cost=0.43..105390.27 rows=318386 width=8) (actual time=0.019..0.116 rows=867 loops=1)
+              Index Cond: (skill_id = 3)
+              Heap Fetches: 0
+              Buffers: shared hit=414
+Planning:
+  Buffers: shared hit=287
+Planning Time: 1.440 ms
+Execution Time: 0.544 ms
+ROLLBACK

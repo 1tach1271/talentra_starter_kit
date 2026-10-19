@@ -18,21 +18,30 @@ DSN = (
     f"user={DB_USER} password={DB_PASSWORD}"
 )
 
-# ── Scale constants (small — increase later for full laptop-scale run) ───────
-# Phase 5 laptop-scale targets:
-#   N_CANDIDATES = 1_000_000
-#   N_ORGS       = 10_000
-#   N_JOBS       = 100_000
-#   APPS_PER_JOB = 50
-#   N_NOTIFICATIONS = 2_000_000
-
-N_CANDIDATES    = 500       # candidate profiles
-N_ORGS          = 20        # organisations (+ one recruiter per org)
-N_JOBS          = 100       # job postings
-APPS_PER_JOB    = 10        # applications per job (random subset of candidates)
-N_GIG_WORKERS   = 20        # gig worker profiles
-N_GIG_REQUESTS  = 30        # gig requests
-N_NOTIFICATIONS = 200       # notification rows
+# ── Scale constants ──────────────────────────────────────────────────────────
+# Docket-required laptop-scale values for the Talentra PostgreSQL hackathon.
+# These figures produce a realistic 1 M-profile dataset that fits on a
+# developer laptop (16 GB RAM recommended) when the seeders use the chunked
+# insertion strategy defined in seed_candidates.py and
+# seed_jobs_applications.py.  Do NOT build the full lists in memory at these
+# sizes — always generate → insert → commit in chunks.
+#
+# Quick reference:
+#   ~1 M candidate_profile rows
+#   ~10 K organisations + recruiter users
+#   ~100 K job postings  (→ ~5 M applications at APPS_PER_JOB = 50)
+#   ~2 M notification rows
+# ─────────────────────────────────────────────────────────────────────────────
+N_CANDIDATES    = 1_000_000   # candidate profiles
+N_ORGS          = 10_000      # organisations (+ one recruiter per org)
+N_JOBS          = 100_000     # job postings
+APPS_PER_JOB    = 50          # applications per job (random subset of candidates)
+N_GIG_WORKERS   = 2_000       # gig worker profiles
+N_GIG_REQUESTS  = 5_000       # gig requests
+N_NOTIFICATIONS = 2_000_000   # notification rows
 
 # ── Batch size for executemany inserts ───────────────────────────────────────
-BATCH_SIZE = 500
+# Increased from 500 → 2 000 for efficiency at scale.  Each executemany call
+# sends one round-trip to Postgres; larger batches mean fewer round-trips and
+# better throughput without ballooning per-batch memory.
+BATCH_SIZE = 2_000

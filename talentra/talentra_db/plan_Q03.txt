@@ -1,0 +1,14 @@
+BEGIN
+Gather  (cost=1000.00..35551.83 rows=1 width=34) (actual time=46.749..49.469 rows=0 loops=1)
+  Workers Planned: 2
+  Workers Launched: 2
+  Buffers: shared hit=27963 read=1433
+  ->  Parallel Seq Scan on candidate_profile  (cost=0.00..34551.73 rows=1 width=34) (actual time=45.479..45.480 rows=0 loops=3)
+        Filter: ((deleted_at IS NULL) AND ((phone_e164)::text = '+919000000150'::text))
+        Rows Removed by Filter: 333333
+        Buffers: shared hit=27963 read=1433
+Planning:
+  Buffers: shared hit=167
+Planning Time: 0.246 ms
+Execution Time: 49.485 ms
+ROLLBACK

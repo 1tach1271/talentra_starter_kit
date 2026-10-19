@@ -130,38 +130,46 @@ def run(conn):
         india_id       = country_ids.get("IN")
 
         # 5. organisations + one recruiter app_user per org
-        org_rows = []
-        for i in range(1, N_ORGS + 1):
-            company = f"{fake.last_name()} {random.choice(COMPANY_SUFFIXES)}"
-            org_type = random.choice(ORG_TYPES)
-            verify   = random.choice(VERIFY_STATUS)
-            org_rows.append((
-                company,
-                f"{company} Pvt Ltd",
-                india_id,
-                random.choice(industry_list),
-                org_type_ids.get(org_type),
-                verify_stat_ids.get(verify),
-                f"https://www.{company.lower().replace(' ', '')}.com",
-            ))
+        # Guard: if we already have >= N_ORGS organisations (from a previous
+        # partial run), skip insertion entirely and reuse the existing rows.
+        existing_org_count = cur.execute("SELECT count(*) FROM organisation").fetchone()[0]
+        if existing_org_count >= N_ORGS:
+            print(f"  organisations:  {existing_org_count} already exist, skipping insert")
+            cur.execute("SELECT id FROM organisation ORDER BY id LIMIT %s", (N_ORGS,))
+            org_ids = [r[0] for r in cur.fetchall()]
+        else:
+            org_rows = []
+            for i in range(1, N_ORGS + 1):
+                company = f"{fake.last_name()} {random.choice(COMPANY_SUFFIXES)}"
+                org_type = random.choice(ORG_TYPES)
+                verify   = random.choice(VERIFY_STATUS)
+                org_rows.append((
+                    company,
+                    f"{company} Pvt Ltd",
+                    india_id,
+                    random.choice(industry_list),
+                    org_type_ids.get(org_type),
+                    verify_stat_ids.get(verify),
+                    f"https://www.{company.lower().replace(' ', '')}.com",
+                ))
 
-        cur.executemany(
-            """
-            INSERT INTO organisation
-              (name, legal_name, country_id, industry_id,
-               org_type_id, verification_status_id, website)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
-            """,
-            org_rows,
-        )
-        print(f"  organisations:  {N_ORGS} inserted")
+            cur.executemany(
+                """
+                INSERT INTO organisation
+                  (name, legal_name, country_id, industry_id,
+                   org_type_id, verification_status_id, website)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                """,
+                org_rows,
+            )
+            print(f"  organisations:  {N_ORGS} inserted")
 
-        # fetch the org ids we just inserted (in insertion order)
-        cur.execute(
-            "SELECT id FROM organisation ORDER BY id DESC LIMIT %s",
-            (N_ORGS,),
-        )
-        org_ids = [r[0] for r in cur.fetchall()][::-1]   # oldest first
+            # fetch the org ids we just inserted (in insertion order)
+            cur.execute(
+                "SELECT id FROM organisation ORDER BY id DESC LIMIT %s",
+                (N_ORGS,),
+            )
+            org_ids = [r[0] for r in cur.fetchall()][::-1]   # oldest first
 
         # 6. admin app_user
         cur.execute(

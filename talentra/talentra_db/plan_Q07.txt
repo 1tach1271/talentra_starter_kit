@@ -1,0 +1,28 @@
+BEGIN
+Limit  (cost=131.22..131.24 rows=9 width=144) (actual time=0.127..0.129 rows=10 loops=1)
+  Buffers: shared hit=60
+  ->  Sort  (cost=131.22..131.24 rows=9 width=144) (actual time=0.126..0.127 rows=10 loops=1)
+        Sort Key: a.applied_at DESC
+        Sort Method: quicksort  Memory: 26kB
+        Buffers: shared hit=60
+        ->  Hash Join  (cost=15.36..131.07 rows=9 width=144) (actual time=0.049..0.115 rows=10 loops=1)
+              Hash Cond: (a.application_stage_id = s.id)
+              Buffers: shared hit=57
+              ->  Nested Loop  (cost=0.85..116.55 rows=9 width=54) (actual time=0.031..0.095 rows=10 loops=1)
+                    Buffers: shared hit=56
+                    ->  Index Scan using idx_application_candidate_applied on application a  (cost=0.43..40.59 rows=9 width=32) (actual time=0.019..0.026 rows=10 loops=1)
+                          Index Cond: (candidate_profile_id = 100)
+                          Buffers: shared hit=16
+                    ->  Index Scan using job_pkey on job j  (cost=0.42..8.44 rows=1 width=38) (actual time=0.007..0.007 rows=1 loops=10)
+                          Index Cond: (id = a.job_id)
+                          Buffers: shared hit=40
+              ->  Hash  (cost=12.00..12.00 rows=200 width=106) (actual time=0.006..0.006 rows=7 loops=1)
+                    Buckets: 1024  Batches: 1  Memory Usage: 9kB
+                    Buffers: shared hit=1
+                    ->  Seq Scan on application_stage s  (cost=0.00..12.00 rows=200 width=106) (actual time=0.002..0.003 rows=7 loops=1)
+                          Buffers: shared hit=1
+Planning:
+  Buffers: shared hit=685 read=18 dirtied=2
+Planning Time: 1.897 ms
+Execution Time: 0.160 ms
+ROLLBACK

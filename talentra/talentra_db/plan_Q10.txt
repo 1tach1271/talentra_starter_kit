@@ -1,0 +1,12 @@
+BEGIN
+Update on application  (cost=0.43..8.45 rows=0 width=0) (actual time=0.969..0.969 rows=0 loops=1)
+  Buffers: shared hit=110
+  ->  Index Scan using application_pkey on application  (cost=0.43..8.45 rows=1 width=22) (actual time=0.080..0.082 rows=1 loops=1)
+        Index Cond: (id = 500)
+        Buffers: shared hit=9
+Planning:
+  Buffers: shared hit=162
+Planning Time: 0.550 ms
+Trigger trg_application_updated_at: time=0.128 calls=1
+Execution Time: 1.031 ms
+ROLLBACK

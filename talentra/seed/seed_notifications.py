@@ -138,148 +138,181 @@ def run(conn):
         print(f"  notification_prefs:   {len(pref_rows)} rows")
 
         # ── 3. job_alert_preferences ──────────────────────────────────────
-        alert_rows = []
-        for pid in profile_ids[:min(len(profile_ids), 100)]:
-            uid = cur.execute(
-                "SELECT app_user_id FROM candidate_profile WHERE id=%s", (pid,)
-            ).fetchone()[0]
-            alert_rows.append((
-                pid,
-                random.choice(job_role_ids),
-                random.choice(city_ids),
-                random.choice(work_type_ids),
-                round(random.randint(3, 15) * 100_000, 2),
-                inr_id,
-                random.choice(alert_freq_ids),
-                True,
-            ))
+        existing_alerts = cur.execute("SELECT count(*) FROM job_alert_preference").fetchone()[0]
+        if existing_alerts > 0:
+            print(f"  job_alert_prefs:      {existing_alerts} already exist, skipping")
+        else:
+            alert_rows = []
+            for pid in profile_ids[:min(len(profile_ids), 100)]:
+                uid = cur.execute(
+                    "SELECT app_user_id FROM candidate_profile WHERE id=%s", (pid,)
+                ).fetchone()[0]
+                alert_rows.append((
+                    pid,
+                    random.choice(job_role_ids),
+                    random.choice(city_ids),
+                    random.choice(work_type_ids),
+                    round(random.randint(3, 15) * 100_000, 2),
+                    inr_id,
+                    random.choice(alert_freq_ids),
+                    True,
+                ))
 
-        cur.executemany(
-            """
-            INSERT INTO job_alert_preference
-              (candidate_profile_id, job_role_id, city_id, work_type_id,
-               min_salary, salary_currency_id, alert_frequency_id, is_active)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
-            """,
-            alert_rows,
-        )
-        print(f"  job_alert_prefs:      {len(alert_rows)} rows")
-
-        # ── 4. notifications ──────────────────────────────────────────────
-        notif_rows = []
-        base_time  = NOW - timedelta(days=90)
-        for i in range(N_NOTIFICATIONS):
-            uid      = random.choice(candidate_user_ids)
-            ch_id    = random.choice(channel_ids)
-            stat_id  = random.choice(noti_stat_ids)
-            event    = random.choice(EVENT_CODES)
-            created  = base_time + timedelta(minutes=i * (90 * 24 * 60 // N_NOTIFICATIONS))
-            sent_at  = created + timedelta(seconds=random.randint(1, 60)) \
-                       if random.random() > 0.1 else None
-            notif_rows.append((uid, ch_id, stat_id, event, created, sent_at))
-
-        for batch_start in range(0, len(notif_rows), BATCH_SIZE):
             cur.executemany(
                 """
-                INSERT INTO notification
-                  (app_user_id, notification_channel_id, notification_status_id,
-                   event_code, created_at, sent_at)
-                VALUES (%s,%s,%s,%s,%s,%s)
+                INSERT INTO job_alert_preference
+                  (candidate_profile_id, job_role_id, city_id, work_type_id,
+                   min_salary, salary_currency_id, alert_frequency_id, is_active)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
                 """,
-                notif_rows[batch_start: batch_start + BATCH_SIZE],
+                alert_rows,
             )
-        print(f"  notifications:        {N_NOTIFICATIONS} inserted")
+            print(f"  job_alert_prefs:      {len(alert_rows)} rows")
+
+        # ── 4. notifications ──────────────────────────────────────────────
+        # Build and insert in chunks to avoid holding 2M tuples in RAM.
+        NOTIF_CHUNK = 50_000
+        base_time   = NOW - timedelta(days=90)
+        total_inserted = 0
+        for chunk_start in range(0, N_NOTIFICATIONS, NOTIF_CHUNK):
+            chunk_end  = min(chunk_start + NOTIF_CHUNK, N_NOTIFICATIONS)
+            notif_rows = []
+            for i in range(chunk_start, chunk_end):
+                uid      = random.choice(candidate_user_ids)
+                ch_id    = random.choice(channel_ids)
+                stat_id  = random.choice(noti_stat_ids)
+                event    = random.choice(EVENT_CODES)
+                created  = base_time + timedelta(minutes=i * (90 * 24 * 60 // N_NOTIFICATIONS))
+                sent_at  = created + timedelta(seconds=random.randint(1, 60)) \
+                           if random.random() > 0.1 else None
+                notif_rows.append((uid, ch_id, stat_id, event, created, sent_at))
+
+            for batch_start in range(0, len(notif_rows), BATCH_SIZE):
+                cur.executemany(
+                    """
+                    INSERT INTO notification
+                      (app_user_id, notification_channel_id, notification_status_id,
+                       event_code, created_at, sent_at)
+                    VALUES (%s,%s,%s,%s,%s,%s)
+                    """,
+                    notif_rows[batch_start: batch_start + BATCH_SIZE],
+                )
+            conn.commit()
+            total_inserted += len(notif_rows)
+            if chunk_start % 500_000 == 0:
+                print(f"  ... notifications {total_inserted}/{N_NOTIFICATIONS}")
+
+        print(f"  notifications:        {total_inserted} inserted")
 
         # ── 5. community_posts ────────────────────────────────────────────
-        post_ids = []
-        for i, topic in enumerate(COMMUNITY_TOPICS):
-            uid = random.choice(candidate_user_ids)
-            cur.execute(
-                """
-                INSERT INTO community_post (app_user_id, title, body, is_published)
-                VALUES (%s,%s,%s,%s)
-                RETURNING id
-                """,
-                (uid, topic, fake.paragraph(nb_sentences=5), True),
-            )
-            post_ids.append(cur.fetchone()[0])
-        print(f"  community_posts:      {len(post_ids)} rows")
+        existing_posts = cur.execute("SELECT count(*) FROM community_post").fetchone()[0]
+        if existing_posts > 0:
+            # Rerun — reuse existing post_ids, skip insert
+            post_ids = [r[0] for r in cur.execute("SELECT id FROM community_post ORDER BY id").fetchall()]
+            print(f"  community_posts:      {existing_posts} already exist, skipping")
+        else:
+            post_ids = []
+            for i, topic in enumerate(COMMUNITY_TOPICS):
+                uid = random.choice(candidate_user_ids)
+                cur.execute(
+                    """
+                    INSERT INTO community_post (app_user_id, title, body, is_published)
+                    VALUES (%s,%s,%s,%s)
+                    RETURNING id
+                    """,
+                    (uid, topic, fake.paragraph(nb_sentences=5), True),
+                )
+                post_ids.append(cur.fetchone()[0])
+            print(f"  community_posts:      {len(post_ids)} rows")
 
         # ── 6. community_comments (2-4 per post) ──────────────────────────
-        comment_rows = []
-        for pid in post_ids:
-            for _ in range(random.randint(2, 4)):
-                uid = random.choice(candidate_user_ids)
-                comment_rows.append((pid, uid, fake.sentence(nb_words=12)))
+        existing_comments = cur.execute("SELECT count(*) FROM community_comment").fetchone()[0]
+        if existing_comments > 0:
+            print(f"  community_comments:   {existing_comments} already exist, skipping")
+        else:
+            comment_rows = []
+            for pid in post_ids:
+                for _ in range(random.randint(2, 4)):
+                    uid = random.choice(candidate_user_ids)
+                    comment_rows.append((pid, uid, fake.sentence(nb_words=12)))
 
-        cur.executemany(
-            """
-            INSERT INTO community_comment (community_post_id, app_user_id, body)
-            VALUES (%s,%s,%s)
-            """,
-            comment_rows,
-        )
-        print(f"  community_comments:   {len(comment_rows)} rows")
+            cur.executemany(
+                """
+                INSERT INTO community_comment (community_post_id, app_user_id, body)
+                VALUES (%s,%s,%s)
+                """,
+                comment_rows,
+            )
+            print(f"  community_comments:   {len(comment_rows)} rows")
 
         # ── 7. support_tickets (one per 20 candidates) ────────────────────
-        ticket_subjects = [
-            "Cannot login to my account",
-            "Profile not visible to recruiters",
-            "Application stuck at Applied stage",
-            "Credits deducted but profile not downloaded",
-            "Duplicate job posting from same company",
-            "Wrong salary shown in job listing",
-            "Notification emails not received",
-            "Request to delete my account",
-            "Resume upload failing",
-            "Interview invitation link expired",
-        ]
-        ticket_ids = []
-        sample_users = random.sample(candidate_user_ids, min(len(ticket_subjects), len(candidate_user_ids)))
-        for uid, subject in zip(sample_users, ticket_subjects):
-            cur.execute(
-                """
-                INSERT INTO support_ticket
-                  (app_user_id, ticket_status_id, ticket_priority_id, subject)
-                VALUES (%s,%s,%s,%s)
-                RETURNING id
-                """,
-                (uid, open_ticket_id,
-                 random.choice(ticket_prio_ids), subject),
-            )
-            ticket_ids.append((cur.fetchone()[0], uid))
-        print(f"  support_tickets:      {len(ticket_ids)} rows")
+        existing_tickets = cur.execute("SELECT count(*) FROM support_ticket").fetchone()[0]
+        if existing_tickets > 0:
+            print(f"  support_tickets:      {existing_tickets} already exist, skipping")
+            print(f"  ticket_messages:      (skipped)")
+        else:
+            ticket_subjects = [
+                "Cannot login to my account",
+                "Profile not visible to recruiters",
+                "Application stuck at Applied stage",
+                "Credits deducted but profile not downloaded",
+                "Duplicate job posting from same company",
+                "Wrong salary shown in job listing",
+                "Notification emails not received",
+                "Request to delete my account",
+                "Resume upload failing",
+                "Interview invitation link expired",
+            ]
+            ticket_ids = []
+            sample_users = random.sample(candidate_user_ids, min(len(ticket_subjects), len(candidate_user_ids)))
+            for uid, subject in zip(sample_users, ticket_subjects):
+                cur.execute(
+                    """
+                    INSERT INTO support_ticket
+                      (app_user_id, ticket_status_id, ticket_priority_id, subject)
+                    VALUES (%s,%s,%s,%s)
+                    RETURNING id
+                    """,
+                    (uid, open_ticket_id,
+                     random.choice(ticket_prio_ids), subject),
+                )
+                ticket_ids.append((cur.fetchone()[0], uid))
+            print(f"  support_tickets:      {len(ticket_ids)} rows")
 
-        # ── 8. support_ticket_messages (first message from user) ──────────
-        ticket_msg_rows = [
-            (tid, uid,
-             f"Hi Support, I'm facing an issue: {fake.sentence(nb_words=15)} "
-             f"Please help resolve this at the earliest. Thank you.")
-            for tid, uid in ticket_ids
-        ]
-        cur.executemany(
-            """
-            INSERT INTO support_ticket_message (support_ticket_id, author_app_user_id, body)
-            VALUES (%s,%s,%s)
-            """,
-            ticket_msg_rows,
-        )
-        print(f"  ticket_messages:      {len(ticket_msg_rows)} rows")
+            # ── 8. support_ticket_messages (first message from user) ──────────
+            ticket_msg_rows = [
+                (tid, uid,
+                 f"Hi Support, I'm facing an issue: {fake.sentence(nb_words=15)} "
+                 f"Please help resolve this at the earliest. Thank you.")
+                for tid, uid in ticket_ids
+            ]
+            cur.executemany(
+                """
+                INSERT INTO support_ticket_message (support_ticket_id, author_app_user_id, body)
+                VALUES (%s,%s,%s)
+                """,
+                ticket_msg_rows,
+            )
+            print(f"  ticket_messages:      {len(ticket_msg_rows)} rows")
 
         # ── 9. FAQs ───────────────────────────────────────────────────────
-        en_lang_id = cur.execute("SELECT id FROM language WHERE code='en'").fetchone()[0]
-        faq_rows = [
-            (en_lang_id, q, a, i, True)
-            for i, (q, a) in enumerate(FAQS)
-        ]
-        cur.executemany(
-            """
-            INSERT INTO faq (language_id, question, answer, display_order, is_published)
-            VALUES (%s,%s,%s,%s,%s)
-            """,
-            faq_rows,
-        )
-        print(f"  faqs:                 {len(faq_rows)} rows")
+        existing_faqs = cur.execute("SELECT count(*) FROM faq").fetchone()[0]
+        if existing_faqs > 0:
+            print(f"  faqs:                 {existing_faqs} already exist, skipping")
+        else:
+            en_lang_id = cur.execute("SELECT id FROM language WHERE code='en'").fetchone()[0]
+            faq_rows = [
+                (en_lang_id, q, a, i, True)
+                for i, (q, a) in enumerate(FAQS)
+            ]
+            cur.executemany(
+                """
+                INSERT INTO faq (language_id, question, answer, display_order, is_published)
+                VALUES (%s,%s,%s,%s,%s)
+                """,
+                faq_rows,
+            )
+            print(f"  faqs:                 {len(faq_rows)} rows")
 
     conn.commit()
     print("✓ seed_notifications done")

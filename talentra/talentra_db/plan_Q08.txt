@@ -1,0 +1,25 @@
+BEGIN
+Limit  (cost=3595.27..3595.39 rows=50 width=58) (actual time=3.338..3.343 rows=50 loops=1)
+  Buffers: shared hit=2371
+  ->  Sort  (cost=3595.27..3596.08 rows=323 width=58) (actual time=3.337..3.339 rows=50 loops=1)
+        Sort Key: a.applied_at DESC
+        Sort Method: top-N heapsort  Memory: 36kB
+        Buffers: shared hit=2371
+        ->  Nested Loop  (cost=1.28..3584.54 rows=323 width=58) (actual time=0.120..3.239 rows=550 loops=1)
+              Buffers: shared hit=2368
+              ->  Nested Loop  (cost=0.85..3436.04 rows=323 width=54) (actual time=0.104..0.337 rows=550 loops=1)
+                    Buffers: shared hit=168
+                    ->  Index Scan using idx_job_organisation_id on job j  (cost=0.42..45.30 rows=13 width=38) (actual time=0.017..0.120 rows=29 loops=1)
+                          Index Cond: (organisation_id = 5)
+                          Buffers: shared hit=35
+                    ->  Index Scan using idx_application_job_stage on application a  (cost=0.43..259.40 rows=143 width=32) (actual time=0.003..0.006 rows=19 loops=29)
+                          Index Cond: (job_id = j.id)
+                          Buffers: shared hit=133
+              ->  Index Scan using candidate_profile_pkey on candidate_profile cp  (cost=0.42..0.46 rows=1 width=20) (actual time=0.005..0.005 rows=1 loops=550)
+                    Index Cond: (id = a.candidate_profile_id)
+                    Buffers: shared hit=2200
+Planning:
+  Buffers: shared hit=760 read=16 dirtied=2
+Planning Time: 2.154 ms
+Execution Time: 3.394 ms
+ROLLBACK

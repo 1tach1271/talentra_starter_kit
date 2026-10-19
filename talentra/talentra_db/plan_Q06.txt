@@ -1,0 +1,24 @@
+BEGIN
+GroupAggregate  (cost=272.62..275.12 rows=143 width=106) (actual time=0.046..0.047 rows=0 loops=1)
+  Group Key: s.code
+  Buffers: shared hit=9
+  ->  Sort  (cost=272.62..272.97 rows=143 width=98) (actual time=0.046..0.046 rows=0 loops=1)
+        Sort Key: s.code
+        Sort Method: quicksort  Memory: 25kB
+        Buffers: shared hit=9
+        ->  Nested Loop  (cost=0.59..267.50 rows=143 width=98) (actual time=0.024..0.024 rows=0 loops=1)
+              Buffers: shared hit=6
+              ->  Index Scan using idx_application_job_stage on application a  (cost=0.43..260.00 rows=143 width=8) (actual time=0.023..0.023 rows=0 loops=1)
+                    Index Cond: (job_id = 17)
+                    Filter: (deleted_at IS NULL)
+                    Buffers: shared hit=6
+              ->  Memoize  (cost=0.15..0.51 rows=1 width=106) (never executed)
+                    Cache Key: a.application_stage_id
+                    Cache Mode: logical
+                    ->  Index Scan using application_stage_pkey on application_stage s  (cost=0.14..0.50 rows=1 width=106) (never executed)
+                          Index Cond: (id = a.application_stage_id)
+Planning:
+  Buffers: shared hit=336
+Planning Time: 0.647 ms
+Execution Time: 0.089 ms
+ROLLBACK

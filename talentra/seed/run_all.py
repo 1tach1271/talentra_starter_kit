@@ -6,8 +6,12 @@ Usage:
     python run_all.py            # use config.py defaults
     python run_all.py --dry-run  # just test the DB connection
 
-The script is idempotent: each seeder uses ON CONFLICT DO NOTHING,
-so re-running it is safe (it will just insert 0 rows the second time).
+The script is idempotent: each seeder uses ON CONFLICT DO NOTHING
+or guards on existing row counts, so re-running it is safe.
+
+Each seeder gets its own connection so that a rollback inside one
+seeder (e.g. seed_gig_billing catching an EXCLUDE constraint violation)
+does not affect the others.
 """
 
 import argparse
@@ -64,22 +68,35 @@ def main():
 
     total_start = time.perf_counter()
 
+    def refresh_analytics(step_conn):
+        print("  → Populating DW dimensions, facts, and refreshing materialized views...")
+        with step_conn.cursor() as cur:
+            cur.execute("CALL dw.sp_refresh_dw()")
+        step_conn.commit()
+
     steps = [
-        ("Master data",          seed_master.run),
-        ("Users & Organisations",seed_users_orgs.run),
-        ("Candidates",           seed_candidates.run),
-        ("Jobs & Applications",  seed_jobs_applications.run),
-        ("Gig & Billing",        seed_gig_billing.run),
-        ("Notifications",        seed_notifications.run),
+        ("Master data",           seed_master.run),
+        ("Users & Organisations", seed_users_orgs.run),
+        ("Candidates",            seed_candidates.run),
+        ("Jobs & Applications",   seed_jobs_applications.run),
+        ("Gig & Billing",         seed_gig_billing.run),
+        ("Notifications",         seed_notifications.run),
+        ("DW Analytics Refresh",  refresh_analytics),
     ]
 
     for name, fn in steps:
         try:
-            run_step(name, fn, conn)
+            # Open a fresh connection for each seeder
+            step_conn = psycopg.connect(DSN, autocommit=False)
+            run_step(name, fn, step_conn)
+            step_conn.close()
         except Exception as e:
             print(f"\n✗ Error in [{name}]: {e}")
-            conn.rollback()
-            conn.close()
+            try:
+                step_conn.rollback()
+                step_conn.close()
+            except Exception:
+                pass
             sys.exit(1)
 
     conn.close()
@@ -96,7 +113,9 @@ def main():
                     "country", "skill", "industry", "job_role",
                     "organisation", "app_user", "candidate_profile",
                     "job", "application", "gig_request",
-                    "notification", "community_post",
+                    "gig_worker_profile", "wallet",
+                    "subscription", "notification",
+                    "community_post", "support_ticket",
                 ]
                 for tbl in tables:
                     try:

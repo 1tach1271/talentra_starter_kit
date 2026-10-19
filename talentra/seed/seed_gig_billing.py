@@ -77,79 +77,96 @@ def run(conn):
         download_type_id= ledger_type_ids.get("download")
 
         # ── 1. gig_worker_profiles ─────────────────────────────────────────
-        gig_worker_rows = [
-            (uid, f"Available for gig work | {fake.job()}", round(random.uniform(200, 2000), 2), inr_id)
-            for uid in user_ids
-        ]
-        cur.executemany(
-            """
-            INSERT INTO gig_worker_profile (app_user_id, headline, hourly_rate, rate_currency_id)
-            VALUES (%s,%s,%s,%s)
-            ON CONFLICT DO NOTHING
-            """,
-            gig_worker_rows,
-        )
-        print(f"  gig_worker_profiles: {cur.rowcount} inserted")
+        # Guard: skip if already seeded (rerun safety)
+        existing_workers = cur.execute("SELECT count(*) FROM gig_worker_profile").fetchone()[0]
+        if existing_workers >= N_GIG_WORKERS:
+            print(f"  gig_worker_profiles: {existing_workers} already exist, skipping")
+        else:
+            gig_worker_rows = [
+                (uid, f"Available for gig work | {fake.job()}", round(random.uniform(200, 2000), 2), inr_id)
+                for uid in user_ids
+            ]
+            cur.executemany(
+                """
+                INSERT INTO gig_worker_profile (app_user_id, headline, hourly_rate, rate_currency_id)
+                VALUES (%s,%s,%s,%s)
+                ON CONFLICT DO NOTHING
+                """,
+                gig_worker_rows,
+            )
+            print(f"  gig_worker_profiles: {cur.rowcount} inserted")
 
+        # Always fetch from DB (works for first run and rerun)
         gig_worker_ids = [r[0] for r in cur.execute(
             "SELECT id FROM gig_worker_profile WHERE app_user_id = ANY(%s)", (user_ids,)
         ).fetchall()]
 
         # ── 2. gig_availability (non-overlapping windows per worker) ───────
-        avail_rows = []
-        for gwid in gig_worker_ids:
-            # give each worker 1-2 future availability windows
-            base = NOW + timedelta(days=random.randint(1, 5))
-            for _ in range(random.randint(1, 2)):
-                start = base
-                end   = start + timedelta(hours=random.randint(4, 48))
-                # tstzrange literal for psycopg
-                avail_rows.append((gwid, f"[{start.isoformat()},{end.isoformat()})"))
-                base  = end + timedelta(days=random.randint(1, 3))
+        # Guard: skip if already seeded (rerun safety — avoids EXCLUDE violation)
+        existing_avail = cur.execute("SELECT count(*) FROM gig_availability").fetchone()[0]
+        if existing_avail > 0:
+            print(f"  gig_availabilities:  {existing_avail} already exist, skipping")
+        else:
+            avail_rows = []
+            for gwid in gig_worker_ids:
+                # give each worker 1-2 future availability windows
+                base = NOW + timedelta(days=random.randint(1, 5))
+                for _ in range(random.randint(1, 2)):
+                    start = base
+                    end   = start + timedelta(hours=random.randint(4, 48))
+                    # tstzrange literal for psycopg
+                    avail_rows.append((gwid, f"[{start.isoformat()},{end.isoformat()})"))
+                    base  = end + timedelta(days=random.randint(1, 3))
 
-        cur.executemany(
-            """
-            INSERT INTO gig_availability (gig_worker_profile_id, available_window)
-            VALUES (%s, %s::tstzrange)
-            ON CONFLICT DO NOTHING
-            """,
-            avail_rows,
-        )
-        print(f"  gig_availabilities:  {len(avail_rows)} rows")
+            cur.executemany(
+                """
+                INSERT INTO gig_availability (gig_worker_profile_id, available_window)
+                VALUES (%s, %s::tstzrange)
+                ON CONFLICT DO NOTHING
+                """,
+                avail_rows,
+            )
+            print(f"  gig_availabilities:  {len(avail_rows)} rows")
 
         # ── 3. gig_requests ────────────────────────────────────────────────
-        gig_req_rows = []
-        for i in range(N_GIG_REQUESTS):
-            org_id    = random.choice(org_ids)
-            city_id   = random.choice(city_ids)
-            starts_at = NOW + timedelta(days=random.randint(2, 30))
-            ends_at   = starts_at + timedelta(hours=random.randint(4, 72))
-            pay       = round(random.randint(500, 10000) / 100) * 100
-            title     = random.choice(GIG_TITLES)
-            gig_req_rows.append((
-                org_id, city_id, open_gig_id,
-                f"{title} #{i + 1}",
-                f"Short-term requirement: {title.lower()}. "
-                f"Duration {int((ends_at - starts_at).total_seconds() / 3600)}h.",
-                starts_at, ends_at,
-                pay, inr_id,
-                random.randint(1, 10),   # openings
-            ))
+        # Guard: skip if already seeded (rerun safety)
+        existing_gigs = cur.execute("SELECT count(*) FROM gig_request").fetchone()[0]
+        if existing_gigs >= N_GIG_REQUESTS:
+            print(f"  gig_requests:      {existing_gigs} already exist, skipping")
+        else:
+            gig_req_rows = []
+            for i in range(N_GIG_REQUESTS):
+                org_id    = random.choice(org_ids)
+                city_id   = random.choice(city_ids)
+                starts_at = NOW + timedelta(days=random.randint(2, 30))
+                ends_at   = starts_at + timedelta(hours=random.randint(4, 72))
+                pay       = round(random.randint(500, 10000) / 100) * 100
+                title     = random.choice(GIG_TITLES)
+                gig_req_rows.append((
+                    org_id, city_id, open_gig_id,
+                    f"{title} #{i + 1}",
+                    f"Short-term requirement: {title.lower()}. "
+                    f"Duration {int((ends_at - starts_at).total_seconds() / 3600)}h.",
+                    starts_at, ends_at,
+                    pay, inr_id,
+                    random.randint(1, 10),   # openings
+                ))
 
-        cur.executemany(
-            """
-            INSERT INTO gig_request (
-                organisation_id, city_id, gig_status_id, title, description,
-                starts_at, ends_at, pay_amount, pay_currency_id, openings
-            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-            """,
-            gig_req_rows,
-        )
-        print(f"  gig_requests:        {N_GIG_REQUESTS} inserted")
+            cur.executemany(
+                """
+                INSERT INTO gig_request (
+                    organisation_id, city_id, gig_status_id, title, description,
+                    starts_at, ends_at, pay_amount, pay_currency_id, openings
+                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """,
+                gig_req_rows,
+            )
+            print(f"  gig_requests:        {N_GIG_REQUESTS} inserted")
 
+        # Always fetch gig_req_ids from DB (works for both first run and rerun)
         gig_req_ids = [r[0] for r in cur.execute(
-            "SELECT id FROM gig_request ORDER BY id DESC LIMIT %s", (N_GIG_REQUESTS,)
-        ).fetchall()][::-1]
+            "SELECT id FROM gig_request ORDER BY id LIMIT %s", (N_GIG_REQUESTS,)
+        ).fetchall()]
 
         # ── 4. gig_applications (2-3 workers per request) ──────────────────
         gig_app_rows = []
@@ -171,6 +188,10 @@ def run(conn):
         )
         print(f"  gig_applications:    {len(gig_app_rows)} rows")
 
+        # Cap to N_ORGS — on a re-run the DB may have more orgs from previous
+        # partial runs; we only want to process the originally intended set.
+        org_ids = org_ids[:N_ORGS]
+
         # ── 5. plans ───────────────────────────────────────────────────────
         cur.executemany(
             """
@@ -187,56 +208,23 @@ def run(conn):
         plan_list = [(pid, code, price, credits) for pid, code, price, credits in plan_rows]
 
         # ── 6. subscriptions + payment_orders + invoices + wallets + ledger
+        # Each org gets one subscription. On rerun, the EXCLUDE constraint on
+        # subscription (no overlapping periods per org) will fire — we use a
+        # SAVEPOINT so only the current org's attempt rolls back; all other
+        # work in the transaction is preserved.
+        # Commit gig/plan data first so it is durable before we start
+        # the per-org loop that may partially rollback via savepoints.
+        conn.commit()
+
         wallet_ids = {}   # org_id → wallet_id
+        subs_created = 0
 
         for i, org_id in enumerate(org_ids):
             plan_id, plan_code, plan_price, dl_credits = random.choice(plan_list)
             period_start = NOW - timedelta(days=30)
             period_end   = NOW + timedelta(days=335)
-            idempotency  = f"seed-pay-org-{org_id}-{uuid.uuid4().hex[:8]}"
 
-            # subscription
-            cur.execute(
-                """
-                INSERT INTO subscription
-                  (organisation_id, plan_id, subscription_status_id, period_start, period_end)
-                VALUES (%s,%s,%s,%s,%s)
-                RETURNING id
-                """,
-                (org_id, plan_id, active_sub_id, period_start, period_end),
-            )
-            sub_id = cur.fetchone()[0]
-
-            # payment_order
-            cur.execute(
-                """
-                INSERT INTO payment_order
-                  (organisation_id, subscription_id, payment_status_id,
-                   amount, currency_id, gateway_reference, idempotency_key, paid_at)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
-                RETURNING id
-                """,
-                (org_id, sub_id, paid_pay_id, plan_price, inr_id,
-                 f"gw-{uuid.uuid4().hex[:12]}", idempotency, period_start),
-            )
-            po_id = cur.fetchone()[0]
-
-            # invoice
-            tax    = round(plan_price * 0.18, 2)
-            total  = plan_price + tax
-            inv_no = f"INV-{org_id:08d}"
-            cur.execute(
-                """
-                INSERT INTO invoice
-                  (organisation_id, payment_order_id, invoice_status_id,
-                   invoice_number, subtotal, tax_amount, total_amount, currency_id)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
-                ON CONFLICT (invoice_number) DO NOTHING
-                """,
-                (org_id, po_id, issued_inv_id, inv_no, plan_price, tax, total, inr_id),
-            )
-
-            # wallet
+            # ── wallet (idempotent — ON CONFLICT DO NOTHING) ──────────────
             cur.execute(
                 """
                 INSERT INTO wallet (organisation_id)
@@ -255,20 +243,74 @@ def run(conn):
                 ).fetchone()[0]
             wallet_ids[org_id] = wallet_id
 
-            # wallet_ledger: credit purchase
+            # ── subscription (may fail on rerun due to EXCLUDE constraint) ─
+            # Use a SAVEPOINT so a violation only rolls back THIS org's
+            # subscription attempt — not the entire transaction.
+            idempotency = f"seed-pay-org-{org_id}-{uuid.uuid4().hex[:8]}"
+            sub_id = None
+            try:
+                cur.execute("SAVEPOINT sp_sub")
+                cur.execute(
+                    """
+                    INSERT INTO subscription
+                      (organisation_id, plan_id, subscription_status_id, period_start, period_end)
+                    VALUES (%s,%s,%s,%s,%s)
+                    RETURNING id
+                    """,
+                    (org_id, plan_id, active_sub_id, period_start, period_end),
+                )
+                sub_id = cur.fetchone()[0]
+                cur.execute("RELEASE SAVEPOINT sp_sub")
+                subs_created += 1
+            except psycopg.errors.ExclusionViolation:
+                # Org already has an overlapping subscription — rollback only
+                # this savepoint and skip to the next org.
+                cur.execute("ROLLBACK TO SAVEPOINT sp_sub")
+                continue
+
+            # ── payment_order (only if we created a subscription) ─────────
+            cur.execute(
+                """
+                INSERT INTO payment_order
+                  (organisation_id, subscription_id, payment_status_id,
+                   amount, currency_id, gateway_reference, idempotency_key, paid_at)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+                RETURNING id
+                """,
+                (org_id, sub_id, paid_pay_id, plan_price, inr_id,
+                 f"gw-{uuid.uuid4().hex[:12]}", idempotency, period_start),
+            )
+            po_id = cur.fetchone()[0]
+
+            # ── invoice ───────────────────────────────────────────────────
+            tax    = round(float(plan_price) * 0.18, 2)
+            total  = float(plan_price) + tax
+            inv_no = f"INV-{org_id:08d}"
+            cur.execute(
+                """
+                INSERT INTO invoice
+                  (organisation_id, payment_order_id, invoice_status_id,
+                   invoice_number, subtotal, tax_amount, total_amount, currency_id)
+                  VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+                  ON CONFLICT (invoice_number) DO NOTHING
+                  """,
+                (org_id, po_id, issued_inv_id, inv_no, plan_price, tax, total, inr_id),
+            )
+
+            # ── wallet_ledger: credit purchase (idempotent) ──────────────
             ledger_key = f"seed-credit-{org_id}-{po_id}"
             cur.execute(
                 """
                 INSERT INTO wallet_ledger
                   (wallet_id, ledger_entry_type_id, credits,
                    payment_order_id, idempotency_key)
-                VALUES (%s,%s,%s,%s,%s)
-                ON CONFLICT (idempotency_key) DO NOTHING
-                """,
+                  VALUES (%s,%s,%s,%s,%s)
+                  ON CONFLICT (idempotency_key) DO NOTHING
+                  """,
                 (wallet_id, purchase_type_id, dl_credits, po_id, ledger_key),
             )
 
-        print(f"  subscriptions/payments/wallets: {N_ORGS} orgs processed")
+        print(f"  subscriptions/payments/wallets: {subs_created} new subs, {len(wallet_ids)} wallets")
 
         # ── 7. profile_downloads (a few sample downloads) ─────────────────
         if recruiter_rows and profile_ids and download_type_id:

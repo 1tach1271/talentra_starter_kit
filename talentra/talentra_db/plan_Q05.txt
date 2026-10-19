@@ -1,0 +1,13 @@
+BEGIN
+Limit  (cost=0.42..82.60 rows=20 width=46) (actual time=0.114..0.617 rows=20 loops=1)
+  Buffers: shared hit=436
+  ->  Index Scan using idx_job_status_published on job  (cost=0.42..49595.09 rows=12070 width=46) (actual time=0.113..0.615 rows=20 loops=1)
+        Index Cond: (job_status_id = 2)
+        Filter: ((title)::text ~~* '%data scientist%'::text)
+        Rows Removed by Filter: 462
+        Buffers: shared hit=436
+Planning:
+  Buffers: shared hit=303
+Planning Time: 0.823 ms
+Execution Time: 0.645 ms
+ROLLBACK

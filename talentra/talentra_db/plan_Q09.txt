@@ -1,0 +1,20 @@
+BEGIN
+Insert on application  (cost=0.00..0.02 rows=0 width=0) (actual time=0.289..0.289 rows=0 loops=1)
+  Conflict Resolution: NOTHING
+  Tuples Inserted: 1
+  Conflicting Tuples: 0
+  Buffers: shared hit=186
+  ->  Result  (cost=0.00..0.02 rows=1 width=1146) (actual time=0.021..0.021 rows=1 loops=1)
+        Buffers: shared hit=10
+Planning:
+  Buffers: shared hit=3
+Planning Time: 0.056 ms
+Trigger for constraint application_job_id_fkey: time=0.519 calls=1
+Trigger for constraint application_candidate_profile_id_fkey: time=0.221 calls=1
+Trigger for constraint application_resume_version_id_fkey: time=0.030 calls=1
+Trigger for constraint application_application_stage_id_fkey: time=0.101 calls=1
+Trigger for constraint application_salary_currency_id_fkey: time=0.029 calls=1
+Trigger for constraint application_created_by_fkey: time=0.215 calls=1
+Trigger for constraint application_updated_by_fkey: time=0.021 calls=1
+Execution Time: 1.444 ms
+ROLLBACK

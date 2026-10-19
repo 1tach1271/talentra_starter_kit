@@ -1,0 +1,13 @@
+BEGIN
+Limit  (cost=0.42..1807.99 rows=20 width=51) (actual time=0.293..8.695 rows=20 loops=1)
+  Buffers: shared hit=9552
+  ->  Index Scan using idx_job_status_published on job  (cost=0.42..50793.19 rows=562 width=51) (actual time=0.292..8.691 rows=20 loops=1)
+        Index Cond: (job_status_id = 2)
+        Filter: ((deleted_at IS NULL) AND (salary_min >= '500000'::numeric) AND (job_role_id = 4) AND (city_id = 5))
+        Rows Removed by Filter: 10862
+        Buffers: shared hit=9552
+Planning:
+  Buffers: shared hit=305
+Planning Time: 0.481 ms
+Execution Time: 8.709 ms
+ROLLBACK
